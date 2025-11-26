@@ -5,26 +5,6 @@ Plateforme de qualification et d'anonymisation RGPD pour données sensibles AGIR
 **🔗 Démo en ligne :** [retrai-shield.streamlit.app](https://retrai-shield.streamlit.app/)
 
 ---
-
-## Contexte
-
-RetraiShield se positionne dans le workflow de gestion des données de test chez AGIRC-ARRCO, entre l'extraction des données de production et leur chargement dans les environnements de recette.
-
-```
-Production → Extraction (OPTIM) → RetraiShield → Test/Recette
-```
-
-**Objectifs :**
-- Qualifier automatiquement les risques RGPD des données extraites
-- Mesurer le niveau d'anonymat (k-anonymité) avant chargement
-- Appliquer des règles d'anonymisation paramétrables
-- Générer des scripts SQL pour anonymisation directe en base
-
----
-
-## Installation
-
-### Prérequis
 - Python 3.10+
 - pip
 - PostgreSQL (cloud : Render, Supabase, Neon)
@@ -37,11 +17,14 @@ pip install -r requirements.txt
 
 ### Configuration PostgreSQL
 
+> **⚠️ IMPORTANT** : Ne JAMAIS hardcoder de credentials dans le code. Utilisez toujours secrets ou variables d'environnement.
+
 #### Option 1 : Utiliser la base cloud Render (Production)
 
 1. Créez un compte sur [Render.com](https://render.com)
 2. Créez une base PostgreSQL gratuite
-3. Copiez l'URL de connexion
+3. Copiez l'URL de connexion (elle contient le mot de passe)
+4. **NE LA PARTAGEZ JAMAIS PUBLIQUEMENT**
 
 #### Option 2 : PostgreSQL local avec Docker
 
@@ -56,14 +39,20 @@ docker run -d \
 
 ### Configuration Streamlit Secrets
 
-Créez `.streamlit/secrets.toml` :
+Copiez le template et remplissez vos credentials :
+
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+```
+
+Éditez `.streamlit/secrets.toml` :
 
 ```toml
 [postgres]
 url = "postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
 ```
 
-**⚠️ Important** : Ce fichier contient des credentials sensibles. Il est déjà dans `.gitignore`.
+**⚠️ Ce fichier est dans `.gitignore`** : Il ne sera JAMAIS commité sur GitHub.
 
 ### Lancement local
 
@@ -92,24 +81,6 @@ Analyse automatique de la sensibilité des colonnes avec classification en 4 cat
 Calcul du k-anonymat pour mesurer le risque de ré-identification :
 - Sélection des quasi-identifiants à analyser
 - Score de risque global (sur 100)
-- Détection des personnes à haut risque (k < 5)
-- Distribution graphique interactive
-- **Mode comparatif** : Analyse avant/après anonymisation
-
-### 3. Anonymisation & Export
-
-Application de règles d'anonymisation paramétrables :
-- Hash SHA256 des identifiants
-- Suppression des noms/prénoms/commune
-- Transformation dates → tranches d'âge
-- Généralisation code postal → département
-- Discrétisation revenus/pensions → tranches
-
-**Double Export :**
-1. **🧪 Pour la Recette (CSV)** : Fichier anonymisé avec métadonnées
-2. **⚙️ Pour la Production (SQL)** : 
-   - **Exécution en temps réel** sur PostgreSQL cloud (Render)
-   - Logs d'exécution détaillés (requête par requête, durée, lignes affectées)
    - Script téléchargeable (DDL/DML production-ready)
    - Démonstration de compétences SQL avancées (MD5, AGE, CASE WHEN, transactions)
 

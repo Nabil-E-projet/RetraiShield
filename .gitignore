@@ -1,5 +1,5 @@
 # Python byte‑code
 __pycache__/
 *.pyc
-.streamlit/secrets.toml
+.streamlit/
 *.backup

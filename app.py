@@ -26,10 +26,27 @@ def get_pg_connection():
         if "postgres" in st.secrets:
             db_url = st.secrets["postgres"]["url"]
         else:
-            # En local, on peut utiliser une variable d'env ou hardcoder pour test
+            # En local, on utilise OBLIGATOIREMENT une variable d'environnement
             import os
-            db_url = os.getenv("POSTGRES_URL", 
-                "postgresql://retraishield_db_user:tAOqUYlBibDUnHzwUaZErp56kUgmwXXW@dpg-d4j6e3uuk2gs73bdr9m0-a.frankfurt-postgres.render.com/retraishield_db")
+            db_url = os.getenv("POSTGRES_URL")
+            
+            if not db_url:
+                st.error("""
+                ❌ **Configuration manquante** : Aucune URL PostgreSQL trouvée.
+                
+                **Pour corriger :**
+                1. Créez le fichier `.streamlit/secrets.toml` avec :
+                ```toml
+                [postgres]
+                url = "postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
+                ```
+                
+                2. Ou définissez la variable d'environnement :
+                ```bash
+                export POSTGRES_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
+                ```
+                """)
+                return None
         
         return psycopg2.connect(db_url)
     except Exception as e:
@@ -373,8 +390,12 @@ elif page == "2. Analyse des Risques":
             st.success("Analyse des données protégées (après anonymisation)")
             st.info("""
             ℹ️ **Pourquoi moins de quasi-identifiants ?** 
-            Les colonnes sensibles ont été transformées ou supprimées :  
-            `nom`, `prenom`, `commune` → `Supprimés`| `date_naissance` → `tranche_age` | `code_postal` → `departement`
+            
+            Les colonnes sensibles ont été transformées pour réduire le risque de ré-identification :
+            
+            *   ❌ **Suppression directe** : `Nom`, `Prénom`, `Commune`
+            *   📅 **Généralisation** : `Date de naissance` → `Tranche d'âge` (ex: 30-40 ans)
+            *   📍 **Généralisation** : `Code Postal` → `Département` (ex: 75)
             """)
 
         classification = classify_columns(df_analysis)
