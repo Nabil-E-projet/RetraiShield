@@ -27,6 +27,7 @@ Production → Extraction (OPTIM) → RetraiShield → Test/Recette
 ### Prérequis
 - Python 3.10+
 - pip
+- PostgreSQL (cloud : Render, Supabase, Neon)
 
 ### Installation des dépendances
 
@@ -34,10 +35,40 @@ Production → Extraction (OPTIM) → RetraiShield → Test/Recette
 pip install -r requirements.txt
 ```
 
+### Configuration PostgreSQL
+
+#### Option 1 : Utiliser la base cloud Render (Production)
+
+1. Créez un compte sur [Render.com](https://render.com)
+2. Créez une base PostgreSQL gratuite
+3. Copiez l'URL de connexion
+
+#### Option 2 : PostgreSQL local avec Docker
+
+```bash
+docker run -d \
+  -e POSTGRES_USER=retraishield_user \
+  -e POSTGRES_PASSWORD=localpassword \
+  -e POSTGRES_DB=retraishield \
+  -p 5432:5432 \
+  postgres:15-alpine
+```
+
+### Configuration Streamlit Secrets
+
+Créez `.streamlit/secrets.toml` :
+
+```toml
+[postgres]
+url = "postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
+```
+
+**⚠️ Important** : Ce fichier contient des credentials sensibles. Il est déjà dans `.gitignore`.
+
 ### Lancement local
 
 ```bash
-streamlit run app.py
+python -m streamlit run app.py
 ```
 
 L'application s'ouvre automatiquement à `http://localhost:8501`
@@ -74,15 +105,13 @@ Application de règles d'anonymisation paramétrables :
 - Généralisation code postal → département
 - Discrétisation revenus/pensions → tranches
 
-**Export CSV** avec métadonnées (règles appliquées, date, k-anonymat final)
-
-### 4. Script SQL PostgreSQL
-
-Génération automatique de scripts SQL pour appliquer les mêmes règles d'anonymisation **directement en base de données** :
-- DDL/DML production-ready (transactions, rollback)
-- Fonctions PostgreSQL avancées (MD5, AGE, SUBSTRING, CASE WHEN)
-- Téléchargement du script avec documentation intégrée
-- Métriques sur le script généré (lignes SQL, opérations)
+**Double Export :**
+1. **🧪 Pour la Recette (CSV)** : Fichier anonymisé avec métadonnées
+2. **⚙️ Pour la Production (SQL)** : 
+   - **Exécution en temps réel** sur PostgreSQL cloud (Render)
+   - Logs d'exécution détaillés (requête par requête, durée, lignes affectées)
+   - Script téléchargeable (DDL/DML production-ready)
+   - Démonstration de compétences SQL avancées (MD5, AGE, CASE WHEN, transactions)
 
 ---
 
@@ -102,7 +131,7 @@ Génération automatique de scripts SQL pour appliquer les mêmes règles d'anon
 
 ```
 RetraiShield/
-├── app.py                  # Application Streamlit (4 onglets)
+├── app.py                  # Application Streamlit (3 onglets)
 ├── data_generator.py       # Génération données démo (Faker)
 ├── rgpd_analyzer.py        # Classification colonnes + k-anonymat
 ├── anonymizer.py           # Règles d'anonymisation

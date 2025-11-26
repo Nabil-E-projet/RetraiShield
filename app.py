@@ -1,12 +1,15 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
+import time
+import psycopg2
+from psycopg2 import sql
 import plotly.express as px
-import plotly.graph_objects as go
+
 from data_generator import generate_demo_data
 from rgpd_analyzer import classify_columns, calculate_k_anonymity, calculate_risk_score, get_risk_label
 from anonymizer import anonymize_data, create_metadata_header
 from sql_generator import generate_sql_anonymization_script
-from datetime import datetime
 
 st.set_page_config(
     page_title="RetraiShield - RGPD Platform",
@@ -15,13 +18,202 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# --- POSTGRESQL CONNECTION ---
+def get_pg_connection():
+    """Connexion à PostgreSQL via secrets Streamlit ou variables d'environnement"""
+    try:
+        # En production Streamlit Cloud, on utilise st.secrets
+        if "postgres" in st.secrets:
+            db_url = st.secrets["postgres"]["url"]
+        else:
+            # En local, on peut utiliser une variable d'env ou hardcoder pour test
+            import os
+            db_url = os.getenv("POSTGRES_URL", 
+                "postgresql://retraishield_db_user:tAOqUYlBibDUnHzwUaZErp56kUgmwXXW@dpg-d4j6e3uuk2gs73bdr9m0-a.frankfurt-postgres.render.com/retraishield_db")
+        
+        return psycopg2.connect(db_url)
+    except Exception as e:
+        st.error(f"❌ Erreur de connexion PostgreSQL : {e}")
+        return None
+
+def execute_sql_script(sql_script: str, table_name: str = "assures"):
+    """
+    Exécute le script SQL généré sur PostgreSQL et retourne les logs détaillés.
+    """
+    logs = []
+    start_time = time.time()
+    
+    conn = get_pg_connection()
+    if not conn:
+        return ["❌ Impossible de se connecter à la base de données"]
+    
+    try:
+        cur = conn.cursor()
+        
+        # Séparer les statements SQL (chaque ligne qui finit par ;)
+        statements = []
+        current_stmt = []
+        
+        for line in sql_script.split('\n'):
+            line = line.strip()
+            # Ignorer les commentaires et lignes vides
+            if not line or line.startswith('--'):
+                continue
+            
+            current_stmt.append(line)
+            
+            # Si la ligne finit par ;, c'est la fin d'un statement
+            if line.endswith(';'):
+                stmt = ' '.join(current_stmt)
+                statements.append(stmt)
+                current_stmt = []
+        
+        logs.append(f"📊 **{len(statements)} requêtes SQL à exécuter**\n")
+        
+        # Exécuter chaque statement
+        for i, stmt in enumerate(statements, 1):
+            try:
+                step_start = time.time()
+                
+                # Afficher la requête (tronquée si trop longue)
+                display_stmt = stmt[:100] + "..." if len(stmt) > 100 else stmt
+                logs.append(f"**[{i}/{len(statements)}]** `{display_stmt}`")
+                
+                cur.execute(stmt)
+                conn.commit()
+                
+                rows_affected = cur.rowcount if cur.rowcount >= 0 else 0
+                step_duration = time.time() - step_start
+                
+                logs.append(f"  ✅ Succès | {rows_affected} lignes | {step_duration:.3f}s\n")
+                
+            except Exception as e:
+                conn.rollback()
+                logs.append(f"  ❌ Erreur : {str(e)}\n")
+                # On continue pour voir toutes les erreurs
+        
+        cur.close()
+        conn.close()
+        
+        total_duration = time.time() - start_time
+        logs.append(f"\n⏱️ **Durée totale : {total_duration:.2f}s**")
+        logs.append(f"✅ **Script exécuté avec succès sur PostgreSQL ({table_name})**")
+        
+    except Exception as e:
+        logs.append(f"\n❌ **Erreur globale : {str(e)}**")
+        if conn:
+            conn.close()
+    
+    return logs
+
+def init_database_table(df: pd.DataFrame, table_name: str = "assures"):
+    """
+    Crée ou réinitialise la table dans PostgreSQL et charge les données.
+    Utilise DROP/CREATE pour garantir le schéma, et execute_batch pour la performance.
+    """
+    conn = get_pg_connection()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        
+        # On doit DROP la table car le schéma a pu changer (colonnes supprimées par le script précédent)
+        cur.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE;")
+        
+        # Create table from dataframe
+        create_sql = f"CREATE TABLE {table_name} ("
+        columns = []
+        for col in df.columns:
+            dtype = df[col].dtype
+            if dtype == 'int64':
+                sql_type = 'INTEGER'
+            elif dtype == 'float64':
+                sql_type = 'NUMERIC'
+            else:
+                sql_type = 'TEXT'
+            columns.append(f"{col} {sql_type}")
+        
+        create_sql += ", ".join(columns) + ");"
+        cur.execute(create_sql)
+        
+        # Insert en BATCH (beaucoup plus rapide)
+        cols = ", ".join(df.columns)
+        placeholders = ", ".join(["%s"] * len(df.columns))
+        insert_sql = f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})"
+        
+        # Convertir le DataFrame en liste de tuples
+        data = [tuple(row) for row in df.values]
+        
+        # Exécuter en batch (1000 lignes à la fois)
+        from psycopg2.extras import execute_batch
+        execute_batch(cur, insert_sql, data, page_size=1000)
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return True
+    except Exception as e:
+        st.error(f"Erreur lors de l'initialisation : {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
+        return False
+
 # --- CSS PERSONNALISÉ POUR UN LOOK PREMIUM ---
 st.markdown("""
 <style>
     .main-header {font-size: 2.5rem; color: #1E3A8A; font-weight: 700;}
     .sub-header {font-size: 1.5rem; color: #1E3A8A; margin-top: 20px;}
-    .card {padding: 20px; border-radius: 10px; background-color: #f8f9fa; border: 1px solid #e9ecef; margin-bottom: 20px;}
-    .stMetric {background-color: #ffffff; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.05);}
+    .card {
+        padding: 20px; 
+        border-radius: 10px; 
+        background-color: rgba(255, 255, 255, 0.05); 
+        border: 1px solid rgba(128, 128, 128, 0.2); 
+        margin-bottom: 20px;
+    }
+    
+    /* Dark mode support pour les métriques */
+    [data-testid="stMetricValue"] {
+        background-color: var(--background-color);
+    }
+    
+    .stMetric {
+        background-color: rgba(255, 255, 255, 0.05);
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Logs SQL style terminal */
+    .sql-logs {
+        background-color: #1e1e1e;
+        color: #cccccc;
+        padding: 15px;
+        border-radius: 8px;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        border: 1px solid #333;
+        box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+        max-height: 500px;
+        overflow-y: auto;
+    }
+    
+    .sql-logs .log-line {
+        margin-bottom: 4px;
+        display: block;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+        padding-bottom: 2px;
+    }
+    
+    .sql-logs .log-header { color: #569cd6; font-weight: bold; } /* Bleu VSCode */
+    .sql-logs .log-query { color: #ce9178; font-family: monospace; } /* Orange String */
+    .sql-logs .log-success { color: #4ec9b0; } /* Vert VSCode */
+    .sql-logs .log-error { color: #f44747; } /* Rouge Erreur */
+    .sql-logs .log-info { color: #9cdcfe; } /* Bleu clair */
 </style>
 """, unsafe_allow_html=True)
 
@@ -43,7 +235,7 @@ with st.sidebar:
     st.subheader("🧭 Navigation")
     page = st.radio(
         "Page",
-        ["1. Diagnostic RGPD", "2. Analyse des Risques", "3. Anonymisation & Export", "4. Script SQL"],
+        ["1. Diagnostic RGPD", "2. Analyse des Risques", "3. Anonymisation & Export"],
         label_visibility="collapsed"
     )
     
@@ -182,7 +374,7 @@ elif page == "2. Analyse des Risques":
             st.info("""
             ℹ️ **Pourquoi moins de quasi-identifiants ?** 
             Les colonnes sensibles ont été transformées ou supprimées :  
-            `nom`, `prenom`, `commune` → Supprimés | `date_naissance` → `tranche_age` | `code_postal` → `departement`
+            `nom`, `prenom`, `commune` → `Supprimés`| `date_naissance` → `tranche_age` | `code_postal` → `departement`
             """)
 
         classification = classify_columns(df_analysis)
@@ -306,123 +498,102 @@ elif page == "3. Anonymisation & Export":
             # Aperçu des données
             st.dataframe(st.session_state.df_anon.head(10), use_container_width=True)
             
-            # Export CSV
+            # SECTION EXPORT (2 colonnes : Test vs Prod)
             st.markdown("---")
-            st.subheader("📥 Export CSV")
-            st.markdown("**Fichier anonymisé prêt pour l'environnement de test**")
+            st.subheader("📤 Exports & Industrialisation")
             
-            k_final = 100
-            meta = create_metadata_header(st.session_state.applied_rules, k_final)
-            csv_content = meta + st.session_state.df_anon.to_csv(index=False)
-            csv_bytes = csv_content.encode('utf-8-sig')
+            col_test, col_prod = st.columns(2)
             
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
+            # 1. Export CSV (Pour le Test)
+            with col_test:
+                st.markdown("""
+                <div class="card">
+                    <h4>🧪 Pour la Recette (CSV)</h4>
+                    <p>Données anonymisées prêtes à être chargées en environnement de test.</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                k_final = 100
+                meta = create_metadata_header(st.session_state.applied_rules, k_final)
+                csv_content = meta + st.session_state.df_anon.to_csv(index=False)
+                csv_bytes = csv_content.encode('utf-8-sig')
+                
                 st.download_button(
-                    "⬇️ Télécharger CSV Anonymisé",
+                    "⬇️ Télécharger le CSV",
                     data=csv_bytes,
                     file_name=f"export_rgpd_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                     mime="text/csv",
                     type="primary",
                     use_container_width=True
                 )
-            
-            st.info("💡 Pour le script SQL PostgreSQL équivalent, consultez l'onglet **4. Script SQL**")
 
-# --- PAGE 4: SCRIPT SQL ---
-elif page == "4. Script SQL":
-    st.markdown('<p class="main-header">🗄️ Script SQL PostgreSQL</p>', unsafe_allow_html=True)
-    
-    st.markdown("""
-    **Génération automatique de scripts d'anonymisation SQL**
-    
-    RetraiShield génère automatiquement le script PostgreSQL équivalent pour appliquer les règles d'anonymisation 
-    **directement en base de données**, sans passer par des exports CSV.
-    """)
-    
-    if st.session_state.df_anon is None:
-        st.warning("⚠️ Veuillez d'abord anonymiser des données dans l'onglet **3. Anonymisation & Export**")
-        st.info("Une fois l'anonymisation lancée, le script SQL correspondant sera généré automatiquement ici.")
-    else:
-        # Génération du script
-        sql_script = generate_sql_anonymization_script(st.session_state.applied_rules)
-        
-        # Métriques sur le script
-        st.markdown("---")
-        st.subheader("📊 Analyse du Script Généré")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        lines_count = len([l for l in sql_script.split('\n') if l.strip() and not l.strip().startswith('--')])
-        col1.metric("Lignes SQL", lines_count)
-        
-        operations = sql_script.count('UPDATE') + sql_script.count('ALTER TABLE') + sql_script.count('DROP COLUMN')
-        col2.metric("Opérations DDL/DML", operations)
-        
-        col3.metric("Règles Appliquées", len(st.session_state.applied_rules))
-        col4.metric("SGBD Cible", "PostgreSQL", delta="Production-ready")
-        
-        # Affichage du script
-        st.markdown("---")
-        st.subheader("📝 Script Généré")
-        st.code(sql_script, language="sql", line_numbers=True)
-        
-        # Bouton de téléchargement
-        st.markdown("---")
-        st.subheader("💾 Téléchargement")
-        
-        col_left, col_center, col_right = st.columns([1, 2, 1])
-        with col_center:
-            st.download_button(
-                "⬇️ Télécharger le Script SQL",
-                data=sql_script,
-                file_name=f"anonymisation_rgpd_{datetime.now().strftime('%Y%m%d_%H%M')}.sql",
-                mime="text/plain",
-                type="primary",
-                use_container_width=True
-            )
-        
-        # Explications techniques
-        st.markdown("---")
-        st.subheader("💡 Détails Techniques")
-        
-        with st.expander("🔍 Comment utiliser ce script"):
-            st.markdown("""
-            **Prérequis:**
-            - PostgreSQL 12+ (pour la fonction `AGE()`)
-            - Accès en écriture sur la table `assures`
-            - Sauvegarde de la base avant exécution
-            
-            **Exécution:**
-            ```bash
-            # Via psql
-            psql -U username -d database_name -f anonymisation_rgpd_YYYYMMDD_HHMM.sql
-            
-            # Ou via pgAdmin
-            # Copier-coller le script dans l'éditeur de requêtes
-            ```
-            
-            **Sécurité:**
-            - Le script est encapsulé dans une transaction (`BEGIN...COMMIT`)
-            - En cas d'erreur, exécutez `ROLLBACK;` pour annuler les modifications
-            - Testez d'abord sur un environnement de développement
-            """)
-        
-        with st.expander("⚙️ Techniques SQL utilisées"):
-            st.markdown("""
-            **Fonctions PostgreSQL:**
-            - `MD5()` : Hachage cryptographique des identifiants
-            - `EXTRACT(YEAR FROM AGE())` : Calcul d'âge pour les tranches
-            - `SUBSTRING()` : Extraction des départements depuis codes postaux
-            - `CASE WHEN` : Logique conditionnelle pour les tranches de revenus
-            
-            **Opérations DDL:**
-            - `ALTER TABLE ADD COLUMN` : Ajout de colonnes anonymisées
-            - `ALTER TABLE DROP COLUMN` : Suppression des colonnes sensibles
-            
-            **Opérations DML:**
-            - `UPDATE ... SET` : Transformation des valeurs en place
-            
-            **Gestion transactionnelle:**
-            - `BEGIN` / `COMMIT` / `ROLLBACK` : Atomicité des opérations
-            """)
+            # 2. Export SQL (Pour la Prod)
+            with col_prod:
+                st.markdown("""
+                <div class="card">
+                    <h4>⚙️ Pour la Production (SQL)</h4>
+                    <p>Script PostgreSQL optimisé pour appliquer ces règles directement en base.</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                sql_script = generate_sql_anonymization_script(st.session_state.applied_rules)
+                
+                # Bouton d'exécution SQL en temps réel
+                if st.button("▶️ Exécuter sur PostgreSQL", key="exec_sql", use_container_width=True, type="primary"):
+                    with st.spinner("🔄 Chargement des données dans PostgreSQL..."):
+                        if init_database_table(df_to_anonymize):
+                            st.success("✅ Table créée et données chargées")
+                    
+                    with st.spinner("⚡ Exécution du script SQL..."):
+                        logs = execute_sql_script(sql_script)
+                        st.session_state.sql_logs = logs
+                
+                st.download_button(
+                    "💾 Télécharger le Script SQL",
+                    data=sql_script,
+                    file_name=f"anonymisation_rgpd_{datetime.now().strftime('%Y%m%d_%H%M')}.sql",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+
+            # LOGS D'EXÉCUTION SQL (Logs en temps réel)
+            if 'sql_logs' in st.session_state and st.session_state.sql_logs:
+                st.markdown("---")
+                st.subheader("📋 Logs d'Exécution PostgreSQL")
+                
+                html_logs = '<div class="sql-logs">'
+                for log in st.session_state.sql_logs:
+                    # Conversion simple Markdown -> HTML pour ce cas spécifique
+                    line = log
+                    
+                    # Gestion du gras **text** -> header
+                    if "**" in line:
+                        parts = line.split("**")
+                        if len(parts) >= 3:
+                            line = f'{parts[0]}<span class="log-header">{parts[1]}</span>{parts[2]}'
+                    
+                    # Gestion du code `text` -> query
+                    if "`" in line:
+                        parts = line.split("`")
+                        if len(parts) >= 3:
+                            line = f'{parts[0]}<span class="log-query">{parts[1]}</span>{parts[2]}'
+                    
+                    # Couleurs spécifiques
+                    if "✅" in line:
+                        line = f'<span class="log-success">{line}</span>'
+                    elif "❌" in line:
+                        line = f'<span class="log-error">{line}</span>'
+                    elif "📊" in line or "⏱️" in line:
+                        line = f'<span class="log-info">{line}</span>'
+                        
+                    html_logs += f'<div class="log-line">{line}</div>'
+                
+                html_logs += '</div>'
+                st.markdown(html_logs, unsafe_allow_html=True)
+
+            # VISUALISATION DU CODE SQL (Compétence technique)
+            with st.expander("👁️ Voir le code SQL généré (Démonstration technique)"):
+                st.markdown("""
+                *Ce script démontre la capacité à traduire des règles métier Python en requêtes SQL performantes (Set-based operations).*
+                """)
+                st.code(sql_script, language="sql", line_numbers=True)

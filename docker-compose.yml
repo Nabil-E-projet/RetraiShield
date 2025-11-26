@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: retraishield_user
+      POSTGRES_PASSWORD: localpassword
+      POSTGRES_DB: retraishield
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U retraishield_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    command: streamlit run app.py
+    ports:
+      - "8501:8501"
+    environment:
+      - POSTGRES_URL=postgresql://retraishield_user:localpassword@db:5432/retraishield
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pg_data:
