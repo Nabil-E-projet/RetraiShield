@@ -181,8 +181,16 @@ def init_database_table(df: pd.DataFrame, table_name: str = "assures"):
 # --- CSS PERSONNALISÉ POUR UN LOOK PREMIUM ---
 st.markdown("""
 <style>
-    .main-header {font-size: 2.5rem; color: #1E3A8A; font-weight: 700;}
-    .sub-header {font-size: 1.5rem; color: #1E3A8A; margin-top: 20px;}
+    .main-header {
+        font-size: 2.5rem; 
+        color: var(--text-color); 
+        font-weight: 700;
+    }
+    .sub-header {
+        font-size: 1.5rem; 
+        color: var(--text-color); 
+        margin-top: 20px;
+    }
     .card {
         padding: 20px; 
         border-radius: 10px; 
