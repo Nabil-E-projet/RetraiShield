@@ -293,6 +293,16 @@ if page == "1. Diagnostic RGPD":
     L'algorithme scanne les noms de colonnes et le contenu pour détecter les risques RGPD.
     """)
     
+    # Légende des catégories
+    st.info("""
+    **📖 Légende des catégories :**
+    
+    - 🔴 **ID Direct** : Données identifiant directement une personne (Nom, Prénom, ID) → ⚠️ À masquer impérativement
+    - 🟠 **Quasi-ID** : Combinaison permettant de ré-identifier (Date naissance, Code postal, Sexe) → ⚠️ À généraliser
+    - 🟡 **Sensible** : Données protégées RGPD (Revenus, Santé, Religion) → ⚠️ À anonymiser
+    - 🟢 **Non sensible** : Données sans risque identifiant (Secteur, Statut)
+    """)
+    
     if st.session_state.df is None:
         st.info("👈 Veuillez charger ou générer des données depuis le menu latéral.")
     else:
