@@ -25,7 +25,7 @@ Calcul du k-anonymat pour mesurer le risque de ré-identification :
 | **Données** | Pandas, Faker |
 | **Visualisation** | Plotly |
 | **SQL** | PostgreSQL (scripts générés) |
-| **Déploiement** | Docker, Streamlit Cloud |
+| **Déploiement** | Docker, Streamlit Cloud, Render |
 
 ---
 
