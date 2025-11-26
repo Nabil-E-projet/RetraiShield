@@ -433,12 +433,84 @@ elif page == "2. Analyse des Risques":
             # Affichage Résultats
             st.markdown("### Résultats de l'analyse")
             
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Score de Risque Global", f"{risk_score:.0f}/100", delta=get_risk_label(risk_score), delta_color="inverse")
+            # AMÉLIORATION 1 : Jauge visuelle du risque
+            risk_color = "🔴" if risk_score > 70 else "🟠" if risk_score > 40 else "🟢"
+            risk_text = "Élevé" if risk_score > 70 else "Moyen" if risk_score > 40 else "Faible"
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Score de Risque Global", f"{risk_score:.0f}/100", delta=f"{risk_color} {risk_text}", delta_color="off")
             c2.metric("k-anonymat Moyen", f"{k_series.mean():.1f}")
             c3.metric("Lignes à Haut Risque (k<5)", f"{(k_series < 5).sum()}")
+            c4.metric("k-anonymat Minimum", f"{k_series.min()}")
+            
+            # Barre de progression visuelle
+            st.markdown("**Niveau de protection**")
+            progress_value = min(100, max(0, 100 - risk_score)) / 100
+            st.progress(progress_value, text=f"Protection : {100 - risk_score:.0f}%")
+            
+            # AMÉLIORATION 2 : Tableau comparatif avant/après
+            if st.session_state.df_anon is not None and "Anonymisées" not in selected_dataset:
+                st.markdown("---")
+                st.markdown("### 📊 Comparaison Avant/Après Anonymisation")
+                
+                # Calcul rapide du k-anonymat après anonymisation
+                df_anon_calc = st.session_state.df_anon.copy()
+                qi_anon = [c for c in ['tranche_age', 'departement', 'sexe'] if c in df_anon_calc.columns]
+                
+                if qi_anon and len(qi_anon) >= 2:
+                    k_anon = calculate_k_anonymity(df_anon_calc, qi_anon)
+                    risk_anon = calculate_risk_score(k_anon)
+                    
+                    col_avant, col_apres, col_gain = st.columns(3)
+                    
+                    with col_avant:
+                        st.metric("Avant (Données brutes)", 
+                                 f"Score: {risk_score:.0f}/100",
+                                 delta=f"k-moyen: {k_series.mean():.1f}",
+                                 delta_color="off")
+                    
+                    with col_apres:
+                        st.metric("Après (Données anonymisées)", 
+                                 f"Score: {risk_anon:.0f}/100",
+                                 delta=f"k-moyen: {k_anon.mean():.1f}",
+                                 delta_color="off")
+                    
+                    with col_gain:
+                        improvement = risk_score - risk_anon
+                        st.metric("Amélioration", 
+                                 f"{improvement:.0f} points",
+                                 delta=f"🎯 {(improvement/risk_score)*100:.0f}% de réduction",
+                                 delta_color="normal")
+            
+            # AMÉLIORATION 3 : Recommandations automatiques
+            st.markdown("---")
+            if risk_score > 70:
+                st.error("""
+                🚨 **Niveau de risque ÉLEVÉ** - Action requise !
+                
+                **Recommandations urgentes :**
+                - ⚠️ Les données contiennent trop de quasi-identifiants précis
+                - 🎯 Passez à l'onglet **3. Anonymisation & Export** pour appliquer les règles
+                - 🔐 Activez toutes les transformations (généralisation dates, codes postaux, etc.)
+                """)
+            elif risk_score > 40:
+                st.warning("""
+                ⚠️ **Niveau de risque MOYEN** - Amélioration recommandée
+                
+                **Suggestions :**
+                - 📍 Généralisez les codes postaux en départements
+                - 📅 Transformez les dates de naissance en tranches d'âge
+                - ➡️ Allez à l'onglet **3. Anonymisation & Export** pour optimiser
+                """)
+            else:
+                st.success("""
+                ✅ **Niveau de risque FAIBLE** - Protection acceptable
+                
+                Les données respectent les seuils RGPD recommandés (k ≥ 5). Vous pouvez procéder à l'export en toute confiance.
+                """)
             
             # Graphiques
+            st.markdown("---")
             col_chart, col_table = st.columns([2, 1])
             
             with col_chart:
@@ -446,17 +518,22 @@ elif page == "2. Analyse des Risques":
                 fig = px.histogram(x=k_plot, nbins=50, title="Distribution du k-anonymat", 
                                  labels={'x': 'k-anonymat', 'y': 'Nb Personnes'},
                                  color_discrete_sequence=['#1E3A8A'])
-                fig.add_vline(x=5, line_dash="dash", line_color="red")
+                fig.add_vline(x=5, line_dash="dash", line_color="red", 
+                             annotation_text="Seuil critique (k=5)", 
+                             annotation_position="top right")
                 st.plotly_chart(fig, use_container_width=True)
             
             with col_table:
-                st.markdown("**Combinaisons risquées**")
+                st.markdown("**Combinaisons risquées (k < 5)**")
                 df_risk = df_calc.copy()
                 df_risk['k'] = k_series
-                st.dataframe(
-                    df_risk[df_risk['k'] < 5][calc_qi + ['k']].drop_duplicates().head(15),
-                    use_container_width=True, hide_index=True
-                )
+                risky_combos = df_risk[df_risk['k'] < 5][calc_qi + ['k']].drop_duplicates().head(15)
+                
+                if len(risky_combos) > 0:
+                    st.dataframe(risky_combos, use_container_width=True, hide_index=True)
+                else:
+                    st.success("✅ Aucune combinaison risquée détectée !")
+
 
 # --- PAGE 3: ANONYMISATION ---
 elif page == "3. Anonymisation & Export":

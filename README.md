@@ -1,72 +1,3 @@
-# RetraiShield
-
-Plateforme de qualification et d'anonymisation RGPD pour données sensibles AGIRC-ARRCO.
-
-**🔗 Démo en ligne :** [retrai-shield.streamlit.app](https://retrai-shield.streamlit.app/)
-
----
-- Python 3.10+
-- pip
-- PostgreSQL (cloud : Render, Supabase, Neon)
-
-### Installation des dépendances
-
-```bash
-pip install -r requirements.txt
-```
-
-### Configuration PostgreSQL
-
-> **⚠️ IMPORTANT** : Ne JAMAIS hardcoder de credentials dans le code. Utilisez toujours secrets ou variables d'environnement.
-
-#### Option 1 : Utiliser la base cloud Render (Production)
-
-1. Créez un compte sur [Render.com](https://render.com)
-2. Créez une base PostgreSQL gratuite
-3. Copiez l'URL de connexion (elle contient le mot de passe)
-4. **NE LA PARTAGEZ JAMAIS PUBLIQUEMENT**
-
-#### Option 2 : PostgreSQL local avec Docker
-
-```bash
-docker run -d \
-  -e POSTGRES_USER=retraishield_user \
-  -e POSTGRES_PASSWORD=localpassword \
-  -e POSTGRES_DB=retraishield \
-  -p 5432:5432 \
-  postgres:15-alpine
-```
-
-### Configuration Streamlit Secrets
-
-Copiez le template et remplissez vos credentials :
-
-```bash
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-```
-
-Éditez `.streamlit/secrets.toml` :
-
-```toml
-[postgres]
-url = "postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
-```
-
-**⚠️ Ce fichier est dans `.gitignore`** : Il ne sera JAMAIS commité sur GitHub.
-
-### Lancement local
-
-```bash
-python -m streamlit run app.py
-```
-
-L'application s'ouvre automatiquement à `http://localhost:8501`
-
----
-
-## Fonctionnalités
-
-### 1. Diagnostic RGPD
 
 Analyse automatique de la sensibilité des colonnes avec classification en 4 catégories :
 - **Identifiants directs** (Nom, Prénom, ID)
@@ -154,7 +85,6 @@ L'application sera accessible sur `http://localhost:8501`
 
 ## Note Technique
 
-**IBM InfoSphere Optim** est l'outil standard d'extraction et de masquage de données chez AGIRC-ARRCO. RetraiShield complète cette chaîne en ajoutant une couche de **qualification RGPD** et de **contrôle qualité** avant chargement dans les environnements de test.
 
 Le projet démontre la capacité à :
 - Manipuler des datasets sensibles (retraite, finance)
